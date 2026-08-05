@@ -1,0 +1,163 @@
+@startuml class-diagram
+title PatternForge — UML Class Diagram
+skinparam shadowing false
+skinparam monochrome true
+skinparam classAttributeIconSize 0
+skinparam defaultFontName "Helvetica"
+
+package "patternsforge.facade" {
+  class ReleaseManager {
+    + deploy() : DeploymentResult
+    + setStrategy(s : DeploymentStrategy) : void
+    + setFailurePoint(p : String) : void
+    + attachObserver(o : DeploymentObserver) : void
+  }
+}
+
+package "patternsforge.builder" {
+  class PipelineBuilder {
+    + addBuild() : PipelineBuilder
+    + addTest() : PipelineBuilder
+    + addProvision() : PipelineBuilder
+    + addDeploy() : PipelineBuilder
+    + addVerify() : PipelineBuilder
+    + addPromote() : PipelineBuilder
+    + build() : Pipeline
+  }
+  class Pipeline {
+    + stages() : List<DeploymentStage>
+  }
+}
+
+package "patternsforge.command" {
+  interface DeploymentCommand {
+    + execute() : void
+    + undo() : void
+  }
+  abstract class DeploymentStage {
+    + name() : String
+    + description() : String
+  }
+  class CommandInvoker {
+    - history : Deque<DeploymentCommand>
+    + execute(c : DeploymentCommand) : void
+    + retryLast() : void
+    + undoAll() : void
+  }
+  class BuildCommand
+  class TestCommand
+  class ProvisionCommand
+  class DeployCommand
+  class VerifyCommand
+  class PromoteCommand
+  class RollbackCommand
+}
+
+package "patternsforge.strategy" {
+  interface DeploymentStrategy {
+    + name() : String
+    + summary() : String
+  }
+  class BlueGreenStrategy
+  class RollingStrategy
+  class CanaryStrategy
+}
+
+package "patternsforge.state" {
+  interface DeploymentState {
+    + name() : String
+    + handle(ctx : DeploymentContext) : void
+  }
+  class DeploymentContext
+  class IdleState
+  class BuildingState
+  class TestingState
+  class DeployingState
+  class HealthyState
+  class FailedState
+  class RollbackState
+}
+
+package "patternsforge.observer" {
+  class DeploymentEngine {
+    + run(p : Pipeline) : DeploymentStatus
+    + broadcast(s : DeploymentStatus, m : String) : void
+  }
+  interface DeploymentObserver {
+    + update(e : DeploymentEvent) : void
+  }
+  class DashboardObserver
+  class EmailObserver
+  class LogObserver
+  class SlackObserver
+}
+
+package "patternsforge.chain" {
+  abstract class FailureHandler {
+    + setNext(h : FailureHandler) : FailureHandler
+    + handle(ctx : FailureContext) : void
+  }
+  class RetryHandler
+  class RollbackHandler
+  class EscalationHandler
+}
+
+package "patternsforge.memento" {
+  class DeploymentCaretaker {
+    + save(s : EnvironmentSnapshot) : void
+    + restore() : EnvironmentSnapshot
+  }
+  class DeploymentMemento
+}
+
+ReleaseManager --> Pipeline
+ReleaseManager --> CommandInvoker
+ReleaseManager --> DeploymentEngine
+ReleaseManager --> HealthMonitor
+ReleaseManager --> RollbackManager
+ReleaseManager --> NotificationService
+ReleaseManager --> DeploymentCaretaker
+ReleaseManager --> DeploymentStrategy
+ReleaseManager ..> StageFactory : creates
+
+PipelineBuilder ..> Pipeline : <<build>>
+Pipeline o-- DeploymentStage
+DeploymentStage ..|> DeploymentCommand
+BuildCommand --|> DeploymentStage
+TestCommand --|> DeploymentStage
+ProvisionCommand --|> DeploymentStage
+DeployCommand --|> DeploymentStage
+VerifyCommand --|> DeploymentStage
+PromoteCommand --|> DeploymentStage
+RollbackCommand --|> DeploymentStage
+CommandInvoker o-- DeploymentCommand
+
+DeploymentStrategy <|.. BlueGreenStrategy
+DeploymentStrategy <|.. RollingStrategy
+DeploymentStrategy <|.. CanaryStrategy
+
+DeploymentContext o-- DeploymentState
+DeploymentState <|.. IdleState
+DeploymentState <|.. BuildingState
+DeploymentState <|.. TestingState
+DeploymentState <|.. DeployingState
+DeploymentState <|.. HealthyState
+DeploymentState <|.. FailedState
+DeploymentState <|.. RollbackState
+
+DeploymentEngine *-- DeploymentObserver
+DeploymentObserver <|.. DashboardObserver
+DeploymentObserver <|.. EmailObserver
+DeploymentObserver <|.. LogObserver
+DeploymentObserver <|.. SlackObserver
+
+FailureHandler <|-- RetryHandler
+FailureHandler <|-- RollbackHandler
+FailureHandler <|-- EscalationHandler
+FailureHandler o-- FailureHandler : next
+
+DeploymentCaretaker ..> DeploymentMemento
+DeploymentMemento ..> EnvironmentSnapshot
+NotificationService o-- DeploymentObserver
+
+@enduml

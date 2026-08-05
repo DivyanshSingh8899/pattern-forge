@@ -1,0 +1,116 @@
+@startuml package-diagram
+title PatternForge — Package Diagram
+skinparam shadowing false
+skinparam monochrome true
+skinparam defaultFontName "Helvetica"
+
+package "patternsforge" {
+  package "main" {
+    [PatternForgeApplication]
+  }
+  package "controller" {
+    [DeploymentController]
+  }
+  package "facade" {
+    [ReleaseManager]
+  }
+
+  package "model" {
+    [DeploymentStatus] <<enum>>
+    [StageResult] <<record>>
+    [EnvironmentSnapshot] <<record>>
+    [ReleaseVersion] <<record>>
+    [DeploymentEvent] <<record>>
+    [DeploymentResult] <<record>>
+  }
+
+  package "factory" {
+    [DeploymentStage] <<abstract>>
+    [StageFactory] <<abstract>>
+    [StandardStageFactory]
+  }
+
+  package "builder" {
+    [PipelineBuilder]
+    [Pipeline]
+  }
+
+  package "command" {
+    [DeploymentCommand] <<interface>>
+    [CommandInvoker]
+    [BuildCommand]
+    [TestCommand]
+    [ProvisionCommand]
+    [DeployCommand]
+    [VerifyCommand]
+    [PromoteCommand]
+    [RollbackCommand]
+    [StageFailureException]
+  }
+
+  package "strategy" {
+    [DeploymentStrategy] <<interface>>
+    [BlueGreenStrategy]
+    [RollingStrategy]
+    [CanaryStrategy]
+  }
+
+  package "state" {
+    [DeploymentState] <<interface>>
+    [DeploymentContext]
+    [IdleState]
+    [BuildingState]
+    [TestingState]
+    [DeployingState]
+    [HealthyState]
+    [FailedState]
+    [RollbackState]
+  }
+
+  package "observer" {
+    [DeploymentEngine]
+    [DeploymentObserver] <<interface>>
+    [DashboardObserver]
+    [EmailObserver]
+    [LogObserver]
+    [SlackObserver]
+  }
+
+  package "chain" {
+    [FailureHandler] <<abstract>>
+    [RetryHandler]
+    [RollbackHandler]
+    [EscalationHandler]
+    [FailureContext] <<record>>
+  }
+
+  package "memento" {
+    [DeploymentCaretaker]
+    [DeploymentMemento]
+  }
+
+  package "service" {
+    [HealthMonitor]
+    [RollbackManager]
+    [NotificationService]
+  }
+
+  package "utils" {
+    [SimulatedEnvironment]
+    [DeploymentLogger]
+  }
+}
+
+main ..> controller : uses
+controller ..> facade : uses
+facade ..> builder : builds
+facade ..> factory : creates stages
+facade ..> command : executes
+facade ..> strategy : picks algorithm
+facade ..> state : tracks lifecycle
+facade ..> observer : notifies
+facade ..> chain : handles failures
+facade ..> memento : saves/restores
+facade ..> service : health, rollback, notifications
+facade ..> utils : simulates infra
+@enduml

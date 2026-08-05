@@ -1,0 +1,76 @@
+@startuml sequence-diagram
+title PatternForge — Deployment & Automatic Rollback Sequence
+skinparam shadowing false
+skinparam monochrome true
+skinparam defaultFontName "Helvetica"
+
+actor "User" as U
+participant "DeploymentController" as C
+participant "ReleaseManager" as RM
+participant "DeploymentCaretaker" as CT
+participant "CommandInvoker" as INV
+participant "DeploymentEngine" as ENG
+participant "HealthMonitor" as HM
+participant "FailurePipeline" as CHAIN
+participant "NotificationService" as NS
+participant "Observers" as OBS
+
+U -> C : select(strategy, failurePoint)
+C -> RM : deploy()
+RM -> RM : setStrategy(strategy)
+RM -> ENG : broadcast(DEPLOYING)
+RM -> CT : save(environment.snapshot())
+activate CT
+CT --> RM : DeploymentMemento
+deactivate CT
+
+RM -> ENG : run(pipeline)
+activate ENG
+
+loop each stage in pipeline
+  ENG -> ENG : context.transition(state)
+  ENG -> INV : execute(stage)
+  activate INV
+  INV -> stage : execute()
+  alt healthy stage
+    stage --> INV : StageResult(ok)
+  else failing stage
+    stage --> INV : throws StageFailureException
+    INV --> ENG : failure
+    ENG -> CHAIN : handle(failure)
+    activate CHAIN
+    CHAIN -> CHAIN : RetryHandler (retries once)
+    alt retry succeeds
+      CHAIN --> ENG : recovered — continue
+    else retry fails
+      CHAIN -> CHAIN : RollbackHandler
+      CHAIN -> INV : undoAll()  // undo() in reverse order
+      deactivate INV
+      CHAIN -> CT : restore()
+      CT --> CHAIN : EnvironmentSnapshot
+      CHAIN -> ENG : restoreFromMemento(snapshot)
+      CHAIN -> CHAIN : EscalationHandler
+      CHAIN --> ENG : rolled back
+    end
+    deactivate CHAIN
+  end
+  INV -> NS : broadcast(status)
+  NS -> OBS : update(event)
+end
+
+ENG -> HM : checkHealth(env, strategy)
+HM --> ENG : healthy / unhealthy
+
+alt healthy
+  ENG -> INV : execute(PromoteCommand)
+  NS -> OBS : HEALTHY — release promoted
+else unhealthy
+  ENG -> CHAIN : handle(health failure)
+  CHAIN -> CHAIN : RollbackHandler → undoAll() → restore()
+  NS -> OBS : ROLLED_BACK + escalation alert
+end
+
+ENG --> RM : DeploymentStatus
+RM --> C : DeploymentResult
+C --> U : summary
+@enduml
