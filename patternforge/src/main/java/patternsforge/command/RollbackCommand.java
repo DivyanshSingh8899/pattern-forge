@@ -29,7 +29,7 @@ public final class RollbackCommand extends DeploymentStage {
 
     @Override
     protected String perform() {
-        rollbackManager.rollback(this);
+        rollbackManager.rollback(name());
         return "rollback completed";
     }
 

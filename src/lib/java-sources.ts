@@ -37,6 +37,11 @@ import cVerify from "../../patternforge/src/main/java/patternsforge/command/Veri
 import cPromote from "../../patternforge/src/main/java/patternsforge/command/PromoteCommand.java?raw";
 import cRollback from "../../patternforge/src/main/java/patternsforge/command/RollbackCommand.java?raw";
 
+import aPrometheusClient from "../../patternforge/src/main/java/patternsforge/adapter/PrometheusClient.java?raw";
+import aPrometheusAdapter from "../../patternforge/src/main/java/patternsforge/adapter/PrometheusHealthAdapter.java?raw";
+import aCloudWatchClient from "../../patternforge/src/main/java/patternsforge/adapter/CloudWatchClient.java?raw";
+import aCloudWatchAdapter from "../../patternforge/src/main/java/patternsforge/adapter/CloudWatchHealthAdapter.java?raw";
+
 import sDeploymentStrategy from "../../patternforge/src/main/java/patternsforge/strategy/DeploymentStrategy.java?raw";
 import sBlueGreen from "../../patternforge/src/main/java/patternsforge/strategy/BlueGreenStrategy.java?raw";
 import sRolling from "../../patternforge/src/main/java/patternsforge/strategy/RollingStrategy.java?raw";
@@ -71,6 +76,8 @@ import meCaretaker from "../../patternforge/src/main/java/patternsforge/memento/
 
 import faReleaseManager from "../../patternforge/src/main/java/patternsforge/facade/ReleaseManager.java?raw";
 
+import svHealthChecker from "../../patternforge/src/main/java/patternsforge/service/HealthChecker.java?raw";
+import svHealthStatus from "../../patternforge/src/main/java/patternsforge/service/HealthStatus.java?raw";
 import svHealthMonitor from "../../patternforge/src/main/java/patternsforge/service/HealthMonitor.java?raw";
 import svRollbackManager from "../../patternforge/src/main/java/patternsforge/service/RollbackManager.java?raw";
 import svNotificationService from "../../patternforge/src/main/java/patternsforge/service/NotificationService.java?raw";
@@ -84,6 +91,8 @@ import tCommandInvoker from "../../patternforge/src/test/java/patternsforge/Comm
 import tCaretaker from "../../patternforge/src/test/java/patternsforge/DeploymentCaretakerTest.java?raw";
 import tObserver from "../../patternforge/src/test/java/patternsforge/ObserverTest.java?raw";
 import tReleaseManager from "../../patternforge/src/test/java/patternsforge/ReleaseManagerTest.java?raw";
+import tAdapter from "../../patternforge/src/test/java/patternsforge/HealthCheckerAdapterTest.java?raw";
+import tStrategy from "../../patternforge/src/test/java/patternsforge/StrategyTest.java?raw";
 
 export interface JavaSource {
   /** Group label shown in the file tree. */
@@ -104,6 +113,10 @@ export const JAVA_SOURCES: JavaSource[] = [
   { group: "main", path: "main/PatternForgeApplication.java", code: appMain, hint: "Entry point — mvn exec:java" },
   { group: "controller", path: "controller/DeploymentController.java", code: controller, hint: "Strategy + failure-point selection" },
   { group: "facade", path: "facade/ReleaseManager.java", code: faReleaseManager, hint: "★ Facade — deploy() drives everything" },
+  { group: "adapter", path: "adapter/PrometheusClient.java", code: aPrometheusClient, hint: "Adaptee — incompatible vendor API (metrics)" },
+  { group: "adapter", path: "adapter/PrometheusHealthAdapter.java", code: aPrometheusAdapter, hint: "★ Adapter — implements HealthChecker" },
+  { group: "adapter", path: "adapter/CloudWatchClient.java", code: aCloudWatchClient, hint: "Adaptee — incompatible vendor API (lookups)" },
+  { group: "adapter", path: "adapter/CloudWatchHealthAdapter.java", code: aCloudWatchAdapter, hint: "★ Adapter — implements HealthChecker" },
   { group: "model", path: "model/DeploymentStatus.java", code: mDeploymentStatus, hint: "Lifecycle enum" },
   { group: "model", path: "model/StageResult.java", code: mStageResult, hint: "Stage outcome record" },
   { group: "model", path: "model/EnvironmentSnapshot.java", code: mEnvironmentSnapshot, hint: "★ Memento payload" },
@@ -152,7 +165,9 @@ export const JAVA_SOURCES: JavaSource[] = [
   { group: "chain", path: "chain/FailureContext.java", code: chFailureContext, hint: "Failure payload" },
   { group: "memento", path: "memento/DeploymentCaretaker.java", code: meCaretaker, hint: "★ Caretaker — save/restore" },
   { group: "memento", path: "memento/DeploymentMemento.java", code: meMemento, hint: "★ Memento token" },
-  { group: "service", path: "service/HealthMonitor.java", code: svHealthMonitor, hint: "Health gate before promote" },
+  { group: "service", path: "service/HealthChecker.java", code: svHealthChecker, hint: "★ Adapter target — vendor-agnostic interface" },
+  { group: "service", path: "service/HealthStatus.java", code: svHealthStatus, hint: "Probe outcome enum" },
+  { group: "service", path: "service/HealthMonitor.java", code: svHealthMonitor, hint: "Health gate — depends only on HealthChecker" },
   { group: "service", path: "service/RollbackManager.java", code: svRollbackManager, hint: "Coordinates undo + restore" },
   { group: "service", path: "service/NotificationService.java", code: svNotificationService, hint: "★ Observer registry" },
   { group: "utils", path: "utils/SimulatedEnvironment.java", code: uSimulatedEnvironment, hint: "K8s stand-in + failure injection" },
@@ -163,6 +178,8 @@ export const JAVA_SOURCES: JavaSource[] = [
   { group: "test", path: "test/…/DeploymentCaretakerTest.java", code: tCaretaker, hint: "JUnit — snapshot restore" },
   { group: "test", path: "test/…/ObserverTest.java", code: tObserver, hint: "JUnit — observer fan-out" },
   { group: "test", path: "test/…/ReleaseManagerTest.java", code: tReleaseManager, hint: "JUnit — end-to-end rollback" },
+  { group: "test", path: "test/…/HealthCheckerAdapterTest.java", code: tAdapter, hint: "JUnit — adapter swap + vendor translation" },
+  { group: "test", path: "test/…/StrategyTest.java", code: tStrategy, hint: "JUnit — runtime strategy switching" },
 ];
 
 export const JAVA_GROUPS: string[] = Array.from(

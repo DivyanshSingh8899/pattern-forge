@@ -139,6 +139,14 @@ export const PATTERNS: PatternMeta[] = [
     viva: "The controller only calls ReleaseManager.deploy(); the facade wires Pipeline, CommandInvoker, HealthMonitor, RollbackManager, NotificationService.",
   },
   {
+    name: "Adapter",
+    category: "Structural",
+    intent: "Wrap an incompatible vendor API so it satisfies an interface the core already expects.",
+    keyClasses: "HealthChecker, PrometheusClient/Adapter, CloudWatchClient/Adapter",
+    demo: "The health gate runs on whichever monitoring provider is plugged in — Prometheus by default, CloudWatch after one call to setMonitoringProvider().",
+    viva: "HealthMonitor only knows HealthChecker; PrometheusHealthAdapter.translate queryCPUUsage()/queryErrorRate() into checkHealth() — swap the vendor, zero core edits.",
+  },
+  {
     name: "Command",
     category: "Behavioral",
     intent: "Encapsulate every stage as an object with execute() and undo() so work can be recorded and reverted.",
@@ -197,6 +205,9 @@ export interface ClassRow {
 
 export const CLASS_TABLE: ClassRow[] = [
   { className: "ReleaseManager", pkg: "facade", pattern: "Facade", responsibility: "Single entry point; wires and drives every subsystem" },
+  { className: "HealthChecker", pkg: "service", pattern: "Adapter (target)", responsibility: "Interface the core depends on: checkHealth(), provider()" },
+  { className: "PrometheusClient / CloudWatchClient", pkg: "adapter", pattern: "Adapter (adaptee)", responsibility: "Simulated vendor APIs with incompatible method names" },
+  { className: "PrometheusHealthAdapter / CloudWatchHealthAdapter", pkg: "adapter", pattern: "Adapter", responsibility: "Translate vendor calls onto HealthChecker; runtime-swappable" },
   { className: "PipelineBuilder", pkg: "builder", pattern: "Builder", responsibility: "Fluent step-by-step assembly of the pipeline" },
   { className: "Pipeline", pkg: "builder", pattern: "Builder (product)", responsibility: "Immutable ordered list of stages" },
   { className: "StageFactory", pkg: "factory", pattern: "Factory Method", responsibility: "Declares the abstract factory method" },
@@ -217,7 +228,7 @@ export const CLASS_TABLE: ClassRow[] = [
   { className: "RetryHandler / RollbackHandler / EscalationHandler", pkg: "chain", pattern: "Chain of Responsibility", responsibility: "Retry once → rollback → escalate" },
   { className: "DeploymentCaretaker", pkg: "memento", pattern: "Memento", responsibility: "Stores and restores the deployment snapshot" },
   { className: "DeploymentMemento", pkg: "memento", pattern: "Memento", responsibility: "Opaque token wrapping an EnvironmentSnapshot" },
-  { className: "HealthMonitor", pkg: "service", pattern: "—", responsibility: "Simulated liveness/readiness/latency probes" },
+  { className: "HealthMonitor", pkg: "service", pattern: "Adapter (client)", responsibility: "Health gate before promote — depends only on HealthChecker" },
   { className: "RollbackManager", pkg: "service", pattern: "—", responsibility: "Coordinates undoAll() + snapshot restore" },
   { className: "SimulatedEnvironment", pkg: "utils", pattern: "—", responsibility: "Stands in for Kubernetes/Docker; failure injection" },
   { className: "DeploymentLogger", pkg: "utils", pattern: "—", responsibility: "Timestamped, colour-coded console + test buffer" },
@@ -235,6 +246,7 @@ export const PACKAGES: PackageNode[] = [
   { name: "main", classes: ["PatternForgeApplication"], note: "Entry point — interactive console or --demo scripted run" },
   { name: "controller", classes: ["DeploymentController"], note: "Accepts user choices; delegates to the facade" },
   { name: "facade", classes: ["ReleaseManager"], note: "Facade — the only class the client ever touches" },
+  { name: "adapter", classes: ["PrometheusClient", "PrometheusHealthAdapter", "CloudWatchClient", "CloudWatchHealthAdapter"], note: "Adapter — vendor monitoring APIs bridged onto HealthChecker" },
   { name: "model", classes: ["DeploymentStatus", "StageResult", "EnvironmentSnapshot", "ReleaseVersion", "DeploymentEvent", "DeploymentResult"], note: "Value types & enums shared across packages" },
   { name: "factory", classes: ["StageFactory", "StandardStageFactory", "DeploymentStage"], note: "Factory Method — stages are created here" },
   { name: "builder", classes: ["PipelineBuilder", "Pipeline"], note: "Builder — fluent pipeline assembly" },
@@ -244,12 +256,13 @@ export const PACKAGES: PackageNode[] = [
   { name: "observer", classes: ["DeploymentEngine", "DeploymentObserver", "DashboardObserver", "EmailObserver", "LogObserver", "SlackObserver"], note: "Observer — subject + four channel observers" },
   { name: "chain", classes: ["FailureHandler", "RetryHandler", "RollbackHandler", "EscalationHandler", "FailureContext", "FailurePipeline"], note: "Chain of Responsibility — Retry → Rollback → Escalate" },
   { name: "memento", classes: ["DeploymentMemento", "DeploymentCaretaker"], note: "Memento — save/restore of environment state" },
-  { name: "service", classes: ["HealthMonitor", "RollbackManager", "NotificationService"], note: "Health checks, rollback coordination, observer registry" },
+  { name: "service", classes: ["HealthChecker", "HealthStatus", "HealthMonitor", "RollbackManager", "NotificationService"], note: "HealthChecker interface (Adapter target), health gate, rollback coordination, observer registry" },
   { name: "utils", classes: ["SimulatedEnvironment", "DeploymentLogger"], note: "Infra stand-in + console logger" },
 ];
 
 export const EXECUTION_FLOW: { step: string; detail: string; pattern: string }[] = [
   { step: "Select strategy", detail: "DeploymentController asks ReleaseManager.setStrategy(...) — the algorithm is swappable at runtime.", pattern: "Strategy" },
+  { step: "Select monitoring provider", detail: "ReleaseManager.setMonitoringProvider(...) swaps the health-check vendor behind the HealthChecker interface — Prometheus or CloudWatch.", pattern: "Adapter" },
   { step: "Assemble pipeline", detail: "PipelineBuilder.addBuild()…addVerify().build() — each add() asks StageFactory for the concrete stage.", pattern: "Builder + Factory Method" },
   { step: "Save snapshot", detail: "ReleaseManager saves environment.snapshot() via DeploymentCaretaker before anything mutates state.", pattern: "Memento" },
   { step: "Run stages", detail: "DeploymentEngine transitions the state context and CommandInvoker executes each stage command.", pattern: "Command + State + Observer" },

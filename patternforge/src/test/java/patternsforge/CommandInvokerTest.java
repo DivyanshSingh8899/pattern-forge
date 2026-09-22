@@ -40,7 +40,8 @@ class CommandInvokerTest {
                 new DeploymentEngine(context, invoker, notifications, environment, logger);
         RollbackManager rollbackManager =
                 new RollbackManager(invoker, new DeploymentCaretaker(), engine, logger);
-        factory = new StandardStageFactory(environment, logger, rollbackManager);
+        factory = new StandardStageFactory(environment, logger, rollbackManager,
+                () -> new patternsforge.strategy.BlueGreenStrategy());
     }
 
     @Test

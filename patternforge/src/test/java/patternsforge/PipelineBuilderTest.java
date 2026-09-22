@@ -32,7 +32,7 @@ class PipelineBuilderTest {
                     case "BUILD" -> new BuildCommand(env, logger);
                     case "TEST" -> new TestCommand(env, logger);
                     case "PROVISION" -> new ProvisionCommand(env, logger);
-                    case "DEPLOY" -> new DeployCommand(env, logger);
+                    case "DEPLOY" -> new DeployCommand(env, logger, () -> new patternsforge.strategy.BlueGreenStrategy());
                     case "VERIFY" -> new VerifyCommand(env, logger);
                     case "PROMOTE" -> new PromoteCommand(env, logger);
                     default -> throw new IllegalArgumentException(type);

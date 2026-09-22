@@ -1,5 +1,9 @@
 package patternsforge.facade;
 
+import patternsforge.adapter.CloudWatchClient;
+import patternsforge.adapter.CloudWatchHealthAdapter;
+import patternsforge.adapter.PrometheusClient;
+import patternsforge.adapter.PrometheusHealthAdapter;
 import patternsforge.builder.Pipeline;
 import patternsforge.builder.PipelineBuilder;
 import patternsforge.chain.FailurePipeline;
@@ -17,6 +21,7 @@ import patternsforge.observer.DeploymentObserver;
 import patternsforge.observer.EmailObserver;
 import patternsforge.observer.LogObserver;
 import patternsforge.observer.SlackObserver;
+import patternsforge.service.HealthChecker;
 import patternsforge.service.HealthMonitor;
 import patternsforge.service.NotificationService;
 import patternsforge.service.RollbackManager;
@@ -33,6 +38,13 @@ import patternsforge.utils.SimulatedEnvironment;
  * {@link CommandInvoker}, {@link DeploymentEngine}, {@link HealthMonitor},
  * {@link RollbackManager}, {@link NotificationService}, {@link DeploymentCaretaker},
  * {@link StageFactory} and the active {@link DeploymentStrategy}.
+ *
+ * <p>It also exposes the two runtime switches:
+ * <ul>
+ *   <li>{@link #setStrategy(DeploymentStrategy)} — <b>Strategy</b> pattern.</li>
+ *   <li>{@link #setMonitoringProvider(HealthChecker)} — <b>Adapter</b> pattern:
+ *       swap Prometheus / CloudWatch monitoring without touching the core.</li>
+ * </ul>
  */
 public final class ReleaseManager {
 
@@ -44,14 +56,22 @@ public final class ReleaseManager {
     private final DeploymentEngine engine = new DeploymentEngine(context, invoker, notifications, environment, logger);
     private final DeploymentCaretaker caretaker = new DeploymentCaretaker();
     private final RollbackManager rollbackManager = new RollbackManager(invoker, caretaker, engine, logger);
-    private final StageFactory stageFactory = new StandardStageFactory(environment, logger, rollbackManager);
-    private final FailurePipeline failurePipeline = new FailurePipeline(logger, rollbackManager, engine);
-    private final HealthMonitor healthMonitor = new HealthMonitor(logger);
+
+    private final HealthMonitor healthMonitor;
+    private final StageFactory stageFactory;
+    private final FailurePipeline failurePipeline;
 
     private DeploymentStrategy strategy = new BlueGreenStrategy();
     private boolean running = false;
 
     public ReleaseManager() {
+        // Adapter: default monitoring provider is Prometheus behind the HealthChecker interface.
+        this.healthMonitor = new HealthMonitor(logger, new PrometheusHealthAdapter(new PrometheusClient(environment)));
+        // Strategy: the factory injects a provider lambda so DeployCommand always asks
+        // for the currently selected strategy at the moment of execution.
+        this.stageFactory = new StandardStageFactory(environment, logger, rollbackManager, () -> strategy);
+        this.failurePipeline = new FailurePipeline(logger, rollbackManager, engine);
+
         engine.setFailurePipeline(failurePipeline);
         notifications.attach(new DashboardObserver(logger));
         notifications.attach(new LogObserver(logger));
@@ -63,11 +83,28 @@ public final class ReleaseManager {
     public void setStrategy(DeploymentStrategy strategy) {
         this.strategy = strategy;
         environment.put("deploymentStrategy", strategy.name());
-        logger.banner(">>> [Strategy] Strategy switched to " + strategy.name() + " (" + strategy.summary() + ")");
+        logger.banner(">>> [Strategy] Strategy switched to " + strategy.name()
+                + " (" + strategy.summary() + ")");
     }
 
     public DeploymentStrategy strategy() {
         return strategy;
+    }
+
+    /**
+     * <b>Adapter:</b> plug in a different monitoring vendor at runtime. The core
+     * deployment engine only ever sees the {@link HealthChecker} interface — e.g.
+     * <pre>
+     *   releaseManager.setMonitoringProvider(new CloudWatchHealthAdapter(new CloudWatchClient(env)));
+     * </pre>
+     */
+    public void setMonitoringProvider(HealthChecker healthChecker) {
+        healthMonitor.setHealthChecker(healthChecker);
+        logger.banner(">>> [Adapter] Health monitoring switched to " + healthChecker.provider());
+    }
+
+    public HealthChecker monitoringProvider() {
+        return healthMonitor.healthChecker();
     }
 
     public void setFailurePoint(String failurePoint) {
@@ -99,9 +136,9 @@ public final class ReleaseManager {
         }
         running = true;
         try {
-            ReleaseVersion previous = environment.version();
             ReleaseVersion target = environment.bumpVersion();
-            logger.banner("=== DEPLOYMENT v" + target + " STARTED (strategy: " + strategy.name() + ") ===");
+            logger.banner("=== DEPLOYMENT v" + target + " STARTED (strategy: " + strategy.name()
+                    + ", monitoring: " + healthMonitor.healthChecker().provider() + ") ===");
 
             // Memento: capture state before anything mutates the environment.
             EnvironmentSnapshot snapshot = environment.snapshot();
@@ -128,7 +165,7 @@ public final class ReleaseManager {
                         "deployment failed — restored to v" + environment.version());
             }
 
-            // Health verification gates promotion.
+            // Health verification gates promotion (Adapter: provider-agnostic probe).
             if (!healthMonitor.checkHealth(environment, strategy)) {
                 engine.broadcast(DeploymentStatus.FAILED, "Health verification failed for v" + target);
                 failurePipeline.handle(new patternsforge.chain.FailureContext(
@@ -152,7 +189,8 @@ public final class ReleaseManager {
             engine.context().transition(new HealthyState());
             engine.broadcast(DeploymentStatus.HEALTHY, "Release v" + target + " is LIVE (promoted)");
             running = false;
-            return DeploymentResult.success(target, "release v" + target + " deployed via " + strategy.name());
+            return DeploymentResult.success(target, "release v" + target + " deployed via " + strategy.name()
+                    + " (health via " + healthMonitor.healthChecker().provider() + ")");
         } finally {
             running = false;
         }
